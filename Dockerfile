@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y python3-pip wget libsndfile1 && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir numpy runpod requests
+RUN pip install --no-cache-dir numpy runpod requests omegaconf scipy soundfile
 
 COPY runpod_silero_handler.py /handler.py
 
