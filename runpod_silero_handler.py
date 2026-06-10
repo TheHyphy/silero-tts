@@ -2,7 +2,7 @@
 """
 RunPod Serverless Handler — Silero TTS (Russian voice kseniya_v2)
 ===============================================================
-Fixed: torch.hub API — correct speaker name and parameter names.
+Model is loaded from local path (baked into Docker image).
 """
 import base64, io, json, os, re, struct, sys, time, traceback
 from pathlib import Path
@@ -12,22 +12,33 @@ import numpy as np
 
 DEFAULT_VOICE = "kseniya_v2"
 DEFAULT_SAMPLE_RATE = 24000
+MODEL_PATH = Path("/runpod-volume/silero/v2_kseniya.pt")
 
 _model = None
 _model_device = None
-_model_speakers = []
+_model_speakers = DEFAULT_VOICE
 
 
 def load_model():
-    global _model, _model_device, _model_speakers
+    global _model, _model_device
     if _model is not None:
-        return _model, _model_device, _model_speakers
+        return _model, _model_device
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     try:
-        print(f"[Silero] Loading via torch.hub (silero_tts, ru, kseniya_v2) on {device}...", flush=True)
+        print(f"[Silero] Loading model from {MODEL_PATH} on {device}...", flush=True)
         t0 = time.time()
+        model = torch.package.PackageImporter(MODEL_PATH).load_pickle("tts_models", "model")
+        model = model.to(device)
+        model.eval()
+        _model = model
+        _model_device = device
+        print(f"[Silero] Loaded in {time.time()-t0:.1f}s", flush=True)
+        return _model, _model_device
+    except Exception as e:
+        print(f"[Silero] Local load failed ({e}), falling back to torch.hub...", flush=True)
+        # Fallback
         model, _ = torch.hub.load(
             repo_or_dir="snakers4/silero-models",
             model="silero_tts",
@@ -39,16 +50,10 @@ def load_model():
         )
         _model = model
         _model_device = device
-        if hasattr(model, "speakers"):
-            _model_speakers = model.speakers
-        print(f"[Silero] Loaded in {time.time()-t0:.1f}s", flush=True)
-        return _model, _model_device, _model_speakers
-    except Exception as e:
-        raise RuntimeError(f"Failed to load Silero model: {e}")
+        return _model, _model_device
 
 
 def split_text(text: str, max_chars: int = 140) -> list[str]:
-    """Split text into chunks under max_chars (Silero limit)."""
     if len(text) <= max_chars:
         return [text]
     sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -75,9 +80,7 @@ def synthesize(text: str, voice: str = DEFAULT_VOICE,
                sample_rate: int = DEFAULT_SAMPLE_RATE) -> tuple[bytes, float]:
     import soundfile as sf
     
-    model, device, speakers = load_model()
-    
-    speaker = voice if voice in speakers else (speakers[0] if speakers else voice)
+    model, device = load_model()
     
     chunks = split_text(text)
     all_wav_files = []
