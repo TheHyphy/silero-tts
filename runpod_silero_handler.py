@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-RunPod Serverless Handler — Silero TTS (Russian voice xenia)
-============================================================
-Fixed: torch.hub API without silero package dependency.
+RunPod Serverless Handler — Silero TTS (Russian voice kseniya_v2)
+===============================================================
+Fixed: torch.hub API — correct speaker name and parameter names.
 """
 import base64, io, json, os, re, struct, sys, time, traceback
 from pathlib import Path
@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 import numpy as np
 
-DEFAULT_VOICE = "xenia"
+DEFAULT_VOICE = "kseniya_v2"
 DEFAULT_SAMPLE_RATE = 24000
 
 _model = None
@@ -23,21 +23,16 @@ def load_model():
     if _model is not None:
         return _model, _model_device, _model_speakers
 
-    torch.backends.quantized.engine = "qnnpack"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Try multiple approaches to load model
-    errors = []
-    
-    # Approach 1: torch.hub with silero_tts
     try:
-        print(f"[Silero] Loading via torch.hub (silero_tts, ru, xenia) on {device}...", flush=True)
+        print(f"[Silero] Loading via torch.hub (silero_tts, ru, kseniya_v2) on {device}...", flush=True)
         t0 = time.time()
         model, _ = torch.hub.load(
             repo_or_dir="snakers4/silero-models",
             model="silero_tts",
             language="ru",
-            speaker="xenia",
+            speaker="kseniya_v2",
             source="github",
             trust_repo=True,
             device=device,
@@ -46,59 +41,14 @@ def load_model():
         _model_device = device
         if hasattr(model, "speakers"):
             _model_speakers = model.speakers
-        print(f"[Silero] Loaded in {time.time()-t0:.1f}s, speakers={_model_speakers[:3]}", flush=True)
-        return _model, _model_device, _model_speakers
-    except Exception as e:
-        errors.append(f"torch.hub: {e}")
-    
-    # Approach 2: torch.hub with different model name
-    try:
-        print(f"[Silero] Trying silero_tts_ru...", flush=True)
-        t0 = time.time()
-        model, _ = torch.hub.load(
-            repo_or_dir="snakers4/silero-models",
-            model="silero_tts_ru",
-            source="github",
-            trust_repo=True,
-            device=device,
-        )
-        _model = model
-        _model_device = device
-        _model_speakers = model.speakers if hasattr(model, "speakers") else ["xenia"]
         print(f"[Silero] Loaded in {time.time()-t0:.1f}s", flush=True)
         return _model, _model_device, _model_speakers
     except Exception as e:
-        errors.append(f"torch.hub v2: {e}")
-
-    # Approach 3: direct download from Silero releases
-    try:
-        print(f"[Silero] Downloading from GitHub releases...", flush=True)
-        import urllib.request
-        import zipfile
-        
-        url = "https://github.com/snakers4/silero-models/releases/download/v4.0/silero_tts_ru_v4.pt"
-        model_path = Path("/tmp/silero_models/silero_tts_ru_v4.pt")
-        model_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        if not model_path.exists():
-            t0 = time.time()
-            urllib.request.urlretrieve(url, model_path)
-            print(f"[Silero] Downloaded in {time.time()-t0:.1f}s", flush=True)
-        
-        model = torch.package.PackageImporter(model_path).load_pickle("tts_models", "model")
-        model = model.to(device)
-        _model = model
-        _model_device = device
-        _model_speakers = ["xenia", "baya", "kseniya", "natasha", "random"]
-        print(f"[Silero] Loaded from direct download", flush=True)
-        return _model, _model_device, _model_speakers
-    except Exception as e:
-        errors.append(f"direct: {e}")
-
-    raise RuntimeError(f"All load approaches failed: {'; '.join(errors)}")
+        raise RuntimeError(f"Failed to load Silero model: {e}")
 
 
-def split_text(text: str, max_chars: int = 450) -> list[str]:
+def split_text(text: str, max_chars: int = 140) -> list[str]:
+    """Split text into chunks under max_chars (Silero limit)."""
     if len(text) <= max_chars:
         return [text]
     sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -123,38 +73,44 @@ def split_text(text: str, max_chars: int = 450) -> list[str]:
 
 def synthesize(text: str, voice: str = DEFAULT_VOICE,
                sample_rate: int = DEFAULT_SAMPLE_RATE) -> tuple[bytes, float]:
+    import soundfile as sf
+    
     model, device, speakers = load_model()
     
     speaker = voice if voice in speakers else (speakers[0] if speakers else voice)
     
     chunks = split_text(text)
-    all_audio = []
+    all_wav_files = []
     total_duration = 0.0
     
     for i, chunk in enumerate(chunks):
         print(f"[Silero] Chunk {i+1}/{len(chunks)}: {len(chunk)} chars", flush=True)
         try:
-            audio = model.save_wav(
-                text=chunk,
-                speaker=speaker,
+            paths = model.save_wav(
+                texts=chunk,
+                audio_pathes='',
                 sample_rate=sample_rate,
-                audio_path=None,
             )
-            if isinstance(audio, torch.Tensor):
-                audio_np = audio.cpu().numpy().flatten()
-            else:
-                audio_np = np.array(audio, dtype=np.float32).flatten()
-            duration = len(audio_np) / sample_rate
-            total_duration += duration
-            all_audio.append(audio_np)
+            wav_path = paths[0] if isinstance(paths, list) else paths
+            all_wav_files.append(wav_path)
         except Exception as e:
             print(f"[Silero] Chunk {i+1} failed: {e}", flush=True)
             continue
     
-    if not all_audio:
+    if not all_wav_files:
         raise RuntimeError("No audio generated")
     
-    combined = np.concatenate(all_audio)
+    combined_parts = []
+    for wav_path in all_wav_files:
+        data, sr = sf.read(wav_path)
+        total_duration += len(data) / sr
+        combined_parts.append(data)
+        try:
+            os.remove(wav_path)
+        except OSError:
+            pass
+    
+    combined = np.concatenate(combined_parts)
     combined_int16 = (combined * 32767).astype(np.int16)
     
     buf = io.BytesIO()
