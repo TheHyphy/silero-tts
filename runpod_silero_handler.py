@@ -38,7 +38,7 @@ def load_model():
             repo_or_dir="snakers4/silero-models",
             model="silero_tts",
             language="ru",
-            speaker="xenia",
+            speaker="v5_ru",
             source="github",
             trust_repo=True,
             device=device,
@@ -217,8 +217,6 @@ def normalize_numbers(text: str) -> str:
                 integer = num2words(int(parts[0]), lang="ru")
                 return f"{integer} целых {parts[1]}"
             num = int(raw)
-            if 1900 <= num <= 2099 and len(raw) == 4:
-                return num2words(num, lang="ru", to="ordinal", gender="m")
             return num2words(num, lang="ru")
         except Exception:
             return raw
