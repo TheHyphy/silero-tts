@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""RunPod Serverless Handler — Silero TTS (Russian voice kseniya_v2)"""
+"""RunPod Serverless Handler — Silero TTS v4 (Russian voice kseniya)"""
 
 import base64, io, json, os, re, struct, sys, time, traceback
 from pathlib import Path
 import torch
 import numpy as np
 
-DEFAULT_VOICE = "kseniya_v2"
-DEFAULT_SAMPLE_RATE = 24000
+DEFAULT_VOICE = "kseniya"
+DEFAULT_SAMPLE_RATE = 48000
 
 _model = None
 _model_device = None
+_model_language = "ru"
+_model_speaker = "v4_ru"
 
 
 def load_model():
@@ -19,19 +21,19 @@ def load_model():
         return _model, _model_device
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[Silero] Loading via torch.hub on {device}...", flush=True)
+    print(f"[Silero] Loading v4_ru on {device}...", flush=True)
     t0 = time.time()
     model, _ = torch.hub.load(
         "snakers4/silero-models", "silero_tts",
-        language="ru", speaker="kseniya_v2",
+        language=_model_language, speaker=_model_speaker,
         source="github", trust_repo=True, device=device,
     )
     _model, _model_device = model, device
-    print(f"[Silero] Loaded in {time.time()-t0:.1f}s", flush=True)
+    print(f"[Silero] v4_ru loaded in {time.time()-t0:.1f}s (voices: {model.get_speakers()})", flush=True)
     return _model, _model_device
 
 
-def split_text(text, max_chars=140):
+def split_text(text, max_chars=200):
     if len(text) <= max_chars:
         return [text]
     sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -59,14 +61,16 @@ def synthesize(text, voice=DEFAULT_VOICE, sample_rate=DEFAULT_SAMPLE_RATE):
     for i, chunk in enumerate(chunks):
         print(f"[Silero] Chunk {i+1}/{len(chunks)}: {len(chunk)} chars", flush=True)
         try:
-            paths = model.save_wav(texts=chunk, audio_pathes='', sample_rate=sample_rate)
-            wav = paths[0] if isinstance(paths, list) else paths
-            data, sr = sf.read(wav)
-            total_dur += len(data) / sr
+            audio = model.apply_tts(chunk, speaker=voice, sample_rate=sample_rate,
+                                   put_accent=True, put_yo=True)
+            if isinstance(audio, list):
+                audio = audio[0]
+            data = audio.cpu().numpy().astype(np.float64)
+            total_dur += len(data) / sample_rate
             parts.append(data)
-            os.remove(wav)
         except Exception as e:
             print(f"[Silero] Chunk failed: {e}", flush=True)
+            traceback.print_exc()
     
     if not parts:
         raise RuntimeError("No audio generated")
@@ -91,7 +95,7 @@ def handler(job):
     voice = inp.get("voice") or inp.get("speaker") or DEFAULT_VOICE
     sr = inp.get("sample_rate", DEFAULT_SAMPLE_RATE)
     
-    print(f"[Handler] voice={voice}, text_len={len(text)}", flush=True)
+    print(f"[Handler] v4_ru voice={voice}, sr={sr}, text_len={len(text)}", flush=True)
     try:
         wav, dur = synthesize(text, voice, sr)
         return {"audio": base64.b64encode(wav).decode(), "sample_rate": sr, "duration_sec": round(dur, 2), "format": "wav"}
