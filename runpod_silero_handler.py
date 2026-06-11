@@ -137,11 +137,10 @@ def synthesize(text: str, voice: str = DEFAULT_VOICE,
     for i, chunk in enumerate(chunks):
         print(f"[Silero] Chunk {i+1}/{len(chunks)}: {len(chunk)} chars", flush=True)
         try:
-            audio = model.save_wav(
+            audio = model.apply_tts(
                 text=chunk,
                 speaker=speaker,
                 sample_rate=sample_rate,
-                audio_path=None,
             )
             if isinstance(audio, torch.Tensor):
                 audio_np = audio.cpu().numpy().flatten()
