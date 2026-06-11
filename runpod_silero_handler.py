@@ -6,13 +6,13 @@ from pathlib import Path
 import torch
 import numpy as np
 
-DEFAULT_VOICE = "kseniya"
+DEFAULT_VOICE = "xenia"
 DEFAULT_SAMPLE_RATE = 48000
 
 _model = None
 _model_device = None
 _model_language = "ru"
-_model_speaker = "v4_ru"
+_model_speaker = "v5_ru"
 
 
 def load_model():
@@ -21,7 +21,7 @@ def load_model():
         return _model, _model_device
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[Silero] Loading v4_ru on {device}...", flush=True)
+    print(f"[Silero] Loading v5_ru on {device}...", flush=True)
     t0 = time.time()
     model, _ = torch.hub.load(
         "snakers4/silero-models", "silero_tts",
@@ -29,7 +29,7 @@ def load_model():
         source="github", trust_repo=True, device=device,
     )
     _model, _model_device = model, device
-    print(f"[Silero] v4_ru loaded in {time.time()-t0:.1f}s (voices: {model.get_speakers()})", flush=True)
+    print(f"[Silero] v5_ru loaded in {time.time()-t0:.1f}s (voices: {model.get_speakers()})", flush=True)
     return _model, _model_device
 
 
@@ -95,7 +95,7 @@ def handler(job):
     voice = inp.get("voice") or inp.get("speaker") or DEFAULT_VOICE
     sr = inp.get("sample_rate", DEFAULT_SAMPLE_RATE)
     
-    print(f"[Handler] v4_ru voice={voice}, sr={sr}, text_len={len(text)}", flush=True)
+    print(f"[Handler] v5_ru voice={voice}, sr={sr}, text_len={len(text)}", flush=True)
     try:
         wav, dur = synthesize(text, voice, sr)
         return {"audio": base64.b64encode(wav).decode(), "sample_rate": sr, "duration_sec": round(dur, 2), "format": "wav"}
