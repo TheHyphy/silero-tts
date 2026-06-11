@@ -9,6 +9,7 @@ import numpy as np
 # v2 — RunPod serverless, L40/L40S GPUs
 DEFAULT_VOICE = "kseniya_v2"
 DEFAULT_SAMPLE_RATE = 24000
+DEFAULT_SPEED = 0.85  # речь медленнее (1.0 = норма)
 
 _model = None
 _model_device = None
@@ -50,7 +51,7 @@ def split_text(text, max_chars=140):
     return chunks
 
 
-def synthesize(text, voice=DEFAULT_VOICE, sample_rate=DEFAULT_SAMPLE_RATE):
+def synthesize(text, voice=DEFAULT_VOICE, sample_rate=DEFAULT_SAMPLE_RATE, speed=DEFAULT_SPEED):
     import soundfile as sf
     model, device = load_model()
     
@@ -58,9 +59,9 @@ def synthesize(text, voice=DEFAULT_VOICE, sample_rate=DEFAULT_SAMPLE_RATE):
     parts, total_dur = [], 0.0
     
     for i, chunk in enumerate(chunks):
-        print(f"[Silero] Chunk {i+1}/{len(chunks)}: {len(chunk)} chars", flush=True)
+        print(f"[Silero] Chunk {i+1}/{len(chunks)}: {len(chunk)} chars (speed={speed})", flush=True)
         try:
-            paths = model.save_wav(texts=chunk, audio_pathes='', sample_rate=sample_rate)
+            paths = model.save_wav(texts=chunk, audio_pathes='', sample_rate=sample_rate, speed=speed)
             wav = paths[0] if isinstance(paths, list) else paths
             data, sr = sf.read(wav)
             total_dur += len(data) / sr
@@ -91,10 +92,11 @@ def handler(job):
         return {"error": "No text provided"}
     voice = inp.get("voice") or inp.get("speaker") or DEFAULT_VOICE
     sr = inp.get("sample_rate", DEFAULT_SAMPLE_RATE)
+    speed = inp.get("speed", DEFAULT_SPEED)
     
-    print(f"[Handler] voice={voice}, text_len={len(text)}", flush=True)
+    print(f"[Handler] voice={voice}, speed={speed}, text_len={len(text)}", flush=True)
     try:
-        wav, dur = synthesize(text, voice, sr)
+        wav, dur = synthesize(text, voice, sr, speed)
         return {"audio": base64.b64encode(wav).decode(), "sample_rate": sr, "duration_sec": round(dur, 2), "format": "wav"}
     except Exception as e:
         traceback.print_exc()
