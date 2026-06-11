@@ -6,10 +6,8 @@ from pathlib import Path
 import torch
 import numpy as np
 
-# v2 — RunPod serverless, L40/L40S GPUs
 DEFAULT_VOICE = "kseniya_v2"
 DEFAULT_SAMPLE_RATE = 24000
-DEFAULT_SPEED = 0.3  # медленная речь (1.0 = норма)
 
 _model = None
 _model_device = None
@@ -51,28 +49,20 @@ def split_text(text, max_chars=140):
     return chunks
 
 
-def synthesize(text, voice=DEFAULT_VOICE, sample_rate=DEFAULT_SAMPLE_RATE, speed=DEFAULT_SPEED):
+def synthesize(text, voice=DEFAULT_VOICE, sample_rate=DEFAULT_SAMPLE_RATE):
     import soundfile as sf
-    from scipy import signal as sp_signal
     model, device = load_model()
     
     chunks = split_text(text)
     parts, total_dur = [], 0.0
     
     for i, chunk in enumerate(chunks):
-        print(f"[Silero] Chunk {i+1}/{len(chunks)}: {len(chunk)} chars (speed={speed})", flush=True)
+        print(f"[Silero] Chunk {i+1}/{len(chunks)}: {len(chunk)} chars", flush=True)
         try:
             paths = model.save_wav(texts=chunk, audio_pathes='', sample_rate=sample_rate)
             wav = paths[0] if isinstance(paths, list) else paths
             data, sr = sf.read(wav)
-            # Slow down audio if speed < 1.0
-            if speed < 1.0:
-                orig_len = len(data)
-                new_len = int(orig_len / speed)
-                data = sp_signal.resample(data, new_len)
-                total_dur += new_len / sr
-            else:
-                total_dur += orig_len / sr
+            total_dur += len(data) / sr
             parts.append(data)
             os.remove(wav)
         except Exception as e:
@@ -100,11 +90,10 @@ def handler(job):
         return {"error": "No text provided"}
     voice = inp.get("voice") or inp.get("speaker") or DEFAULT_VOICE
     sr = inp.get("sample_rate", DEFAULT_SAMPLE_RATE)
-    speed = inp.get("speed", DEFAULT_SPEED)
     
-    print(f"[Handler] voice={voice}, speed={speed}, text_len={len(text)}", flush=True)
+    print(f"[Handler] voice={voice}, text_len={len(text)}", flush=True)
     try:
-        wav, dur = synthesize(text, voice, sr, speed)
+        wav, dur = synthesize(text, voice, sr)
         return {"audio": base64.b64encode(wav).decode(), "sample_rate": sr, "duration_sec": round(dur, 2), "format": "wav"}
     except Exception as e:
         traceback.print_exc()
