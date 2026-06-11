@@ -12,9 +12,8 @@ RUN pip install --no-cache-dir numpy runpod requests omegaconf scipy soundfile
 RUN python3 -c "\
 import torch; \
 model, _ = torch.hub.load('snakers4/silero-models', 'silero_tts', language='ru', speaker='v5_ru', source='github', trust_repo=True, device='cpu'); \
-print(f'v5_ru loaded OK, voices: {model.get_speakers()}'); \
 model.apply_tts('Тест.', speaker='xenia', sample_rate=48000); \
-print('Warm-up OK')"
+print('v5_ru + warm-up OK')"
 
 COPY runpod_silero_handler.py /handler.py
 

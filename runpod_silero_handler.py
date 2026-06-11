@@ -29,7 +29,7 @@ def load_model():
         source="github", trust_repo=True, device=device,
     )
     _model, _model_device = model, device
-    print(f"[Silero] v5_ru loaded in {time.time()-t0:.1f}s (voices: {model.get_speakers()})", flush=True)
+    print(f"[Silero] v5_ru loaded in {time.time()-t0:.1f}s", flush=True)
     return _model, _model_device
 
 
