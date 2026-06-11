@@ -9,7 +9,7 @@ import numpy as np
 # v2 — RunPod serverless, L40/L40S GPUs
 DEFAULT_VOICE = "kseniya_v2"
 DEFAULT_SAMPLE_RATE = 24000
-DEFAULT_SPEED = 0.85  # речь медленнее (1.0 = норма)
+DEFAULT_SPEED = 0.3  # медленная речь (1.0 = норма)
 
 _model = None
 _model_device = None
@@ -53,6 +53,7 @@ def split_text(text, max_chars=140):
 
 def synthesize(text, voice=DEFAULT_VOICE, sample_rate=DEFAULT_SAMPLE_RATE, speed=DEFAULT_SPEED):
     import soundfile as sf
+    from scipy import signal as sp_signal
     model, device = load_model()
     
     chunks = split_text(text)
@@ -61,10 +62,17 @@ def synthesize(text, voice=DEFAULT_VOICE, sample_rate=DEFAULT_SAMPLE_RATE, speed
     for i, chunk in enumerate(chunks):
         print(f"[Silero] Chunk {i+1}/{len(chunks)}: {len(chunk)} chars (speed={speed})", flush=True)
         try:
-            paths = model.save_wav(texts=chunk, audio_pathes='', sample_rate=sample_rate, speed=speed)
+            paths = model.save_wav(texts=chunk, audio_pathes='', sample_rate=sample_rate)
             wav = paths[0] if isinstance(paths, list) else paths
             data, sr = sf.read(wav)
-            total_dur += len(data) / sr
+            # Slow down audio if speed < 1.0
+            if speed < 1.0:
+                orig_len = len(data)
+                new_len = int(orig_len / speed)
+                data = sp_signal.resample(data, new_len)
+                total_dur += new_len / sr
+            else:
+                total_dur += orig_len / sr
             parts.append(data)
             os.remove(wav)
         except Exception as e:
