@@ -6,6 +6,7 @@ on:
     paths:
       - 'Dockerfile'
       - 'runpod_silero_handler.py'
+      - '.github/workflows/*.yml'
   workflow_dispatch:
 
 jobs:

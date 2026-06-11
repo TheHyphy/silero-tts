@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-RunPod Serverless Handler — Silero TTS (Russian voice kseniya_v2)
-===============================================================
-Model is loaded from local path (baked into Docker image).
+# RunPod Serverless Handler — Silero TTS (Russian voice kseniya_v2)
+# v1.0 — model baked into Docker image
 """
 import base64, io, json, os, re, struct, sys, time, traceback
 from pathlib import Path
