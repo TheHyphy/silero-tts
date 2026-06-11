@@ -11,7 +11,7 @@ import numpy as np
 
 DEFAULT_VOICE = "kseniya_v2"
 DEFAULT_SAMPLE_RATE = 24000
-MODEL_PATH = Path("/app/silero/v2_kseniya.pt")
+MODEL_PATH = Path("/runpod-volume/silero/v2_kseniya.pt")
 
 _model = None
 _model_device = None

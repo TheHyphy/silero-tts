@@ -8,9 +8,6 @@ RUN apt-get update && apt-get install -y python3-pip wget libsndfile1 && rm -rf 
 
 RUN pip install --no-cache-dir numpy runpod requests omegaconf scipy soundfile
 
-# Model is downloaded by CI workflow and placed in context
-COPY v2_kseniya.pt /app/silero/v2_kseniya.pt
-
 COPY runpod_silero_handler.py /handler.py
 
 CMD ["python3", "-u", "/handler.py"]
