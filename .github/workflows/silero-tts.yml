@@ -34,8 +34,7 @@ jobs:
           pip install awscli -q
           URL=$(aws s3 presign s3://rtxh7bc518/silero/v2_kseniya.pt \
             --endpoint-url https://s3api-us-ne-1.runpod.io \
-            --expires-in 3600 \
-            --profile runpod)
+            --expires-in 3600)
           echo "MODEL_URL=$URL" >> $GITHUB_OUTPUT
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY }}
