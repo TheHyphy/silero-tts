@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 import numpy as np
 
+# v2 — RunPod serverless, L40/L40S GPUs
 DEFAULT_VOICE = "kseniya_v2"
 DEFAULT_SAMPLE_RATE = 24000
 
