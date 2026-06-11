@@ -28,6 +28,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Get model download URL
+        id: model
+        run: |
+          pip install awscli -q
+          URL=$(aws s3 presign s3://rtxh7bc518/silero/v2_kseniya.pt \
+            --endpoint-url https://s3api-us-ne-1.runpod.io \
+            --expires-in 3600 \
+            --profile runpod)
+          echo "MODEL_URL=$URL" >> $GITHUB_OUTPUT
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
+
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
@@ -45,5 +58,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            MODEL_URL=${{ steps.model.outputs.MODEL_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
