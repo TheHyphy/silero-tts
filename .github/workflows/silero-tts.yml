@@ -29,15 +29,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download model from S3
-        run: |
-          pip install awscli -q
-          aws s3 cp s3://rtxh7bc518/silero/v2_kseniya.pt ./v2_kseniya.pt \
-            --endpoint-url https://s3api-us-ne-1.runpod.io
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
-
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
