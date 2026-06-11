@@ -19,22 +19,6 @@ def load_model():
         return _model, _model_device
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # Try volume first, fall back to torch.hub (model pre-cached in image)
-    volume_path = Path("/runpod-volume/silero/v2_kseniya.pt")
-    if volume_path.exists():
-        print(f"[Silero] Loading from {volume_path}...", flush=True)
-        try:
-            t0 = time.time()
-            model = torch.package.PackageImporter(volume_path).load_pickle("tts_models", "model")
-            model = model.to(device).eval()
-            _model, _model_device = model, device
-            print(f"[Silero] Loaded in {time.time()-t0:.1f}s", flush=True)
-            return _model, _model_device
-        except Exception as e:
-            print(f"[Silero] Volume load failed: {e}", flush=True)
-    
-    # Fallback to torch.hub (model cached from Docker build)
     print(f"[Silero] Loading via torch.hub on {device}...", flush=True)
     t0 = time.time()
     model, _ = torch.hub.load(
