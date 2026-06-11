@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y python3-pip wget libsndfile1 && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir numpy runpod requests omegaconf scipy soundfile
+RUN pip install --no-cache-dir numpy runpod requests omegaconf scipy soundfile num2words
 
 # Pre-download model into torch hub cache (v5_ru with xenia voice)
 RUN python3 -c "\
