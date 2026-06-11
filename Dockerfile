@@ -1,13 +1,13 @@
-# Silero TTS -- RunPod Serverless
-FROM pytorch/pytorch:2.6.0-cuda12.6-cudnn9-runtime
+# Silero TTS -- RunPod Serverless (fast pull: runpod/base cached on all nodes)
+FROM runpod/base:0.7.0-cuda12.4.1
 
-ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-RUN apt-get update && apt-get install -y python3-pip wget libsndfile1 && rm -rf /var/lib/apt/lists/*
-
+# Install torch and deps (model loaded from /runpod-volume)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu124
 RUN pip install --no-cache-dir numpy runpod requests omegaconf scipy soundfile
 
 COPY runpod_silero_handler.py /handler.py
 
+# Model is on network volume at /runpod-volume/silero/v2_kseniya.pt
 CMD ["python3", "-u", "/handler.py"]
