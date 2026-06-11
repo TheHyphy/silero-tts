@@ -126,7 +126,9 @@ def synthesize(text: str, voice: str = DEFAULT_VOICE,
                sample_rate: int = DEFAULT_SAMPLE_RATE) -> tuple[bytes, float]:
     model, device, speakers = load_model()
     
-    speaker = voice if voice in speakers else (speakers[0] if speakers else voice)
+    # model.speakers returns model names (v5_ru, v4_ru...), not voice names
+    # Use voice directly — valid voices for v5_ru: xenia, baya, kseniya, natasha, aidar, irina, ruslan
+    speaker = voice
     
     chunks = split_text(text)
     all_audio = []
