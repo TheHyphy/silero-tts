@@ -123,22 +123,18 @@ def split_text(text: str, max_chars: int = 450) -> list[str]:
 
 
 def synthesize(text: str, voice: str = DEFAULT_VOICE,
-               sample_rate: int = DEFAULT_SAMPLE_RATE) -> tuple[bytes, float]:
+               sample_rate: int = DEFAULT_SAMPLE_RATE,
+               use_ssml: bool = False) -> tuple[bytes, float]:
     model, device, speakers = load_model()
     
-    # model.speakers returns model names (v5_ru, v4_ru...), not voice names
-    # Use voice directly — valid voices for v5_ru: xenia, baya, kseniya, natasha, aidar, irina, ruslan
     speaker = voice
     
-    chunks = split_text(text)
-    all_audio = []
-    total_duration = 0.0
-    
-    for i, chunk in enumerate(chunks):
-        print(f"[Silero] Chunk {i+1}/{len(chunks)}: {len(chunk)} chars", flush=True)
+    if use_ssml:
+        # SSML: не разбивать на чанки, не нормализовать
+        print(f"[Silero] SSML synthesis: {len(text)} chars", flush=True)
         try:
             audio = model.apply_tts(
-                text=chunk,
+                ssml_text=text,
                 speaker=speaker,
                 sample_rate=sample_rate,
             )
@@ -147,11 +143,34 @@ def synthesize(text: str, voice: str = DEFAULT_VOICE,
             else:
                 audio_np = np.array(audio, dtype=np.float32).flatten()
             duration = len(audio_np) / sample_rate
-            total_duration += duration
-            all_audio.append(audio_np)
+            all_audio = [audio_np]
+            total_duration = duration
         except Exception as e:
-            print(f"[Silero] Chunk {i+1} failed: {e}", flush=True)
-            continue
+            print(f"[Silero] SSML synthesis failed: {e}", flush=True)
+            raise RuntimeError(f"SSML synthesis failed: {e}")
+    else:
+        chunks = split_text(text)
+        all_audio = []
+        total_duration = 0.0
+        
+        for i, chunk in enumerate(chunks):
+            print(f"[Silero] Chunk {i+1}/{len(chunks)}: {len(chunk)} chars", flush=True)
+            try:
+                audio = model.apply_tts(
+                    text=chunk,
+                    speaker=speaker,
+                    sample_rate=sample_rate,
+                )
+                if isinstance(audio, torch.Tensor):
+                    audio_np = audio.cpu().numpy().flatten()
+                else:
+                    audio_np = np.array(audio, dtype=np.float32).flatten()
+                duration = len(audio_np) / sample_rate
+                total_duration += duration
+                all_audio.append(audio_np)
+            except Exception as e:
+                print(f"[Silero] Chunk {i+1} failed: {e}", flush=True)
+                continue
     
     if not all_audio:
         raise RuntimeError("No audio generated")
@@ -227,16 +246,32 @@ def normalize_numbers(text: str) -> str:
 def handler(job):
     job_input = job.get("input", {})
     text = job_input.get("text", "")
-    if not text:
+    ssml_text = job_input.get("ssml_text", "")
+    
+    if not text and not ssml_text:
         return {"error": "No text provided"}
+    
     voice = job_input.get("voice") or job_input.get("speaker") or DEFAULT_VOICE
     sample_rate = job_input.get("sample_rate", DEFAULT_SAMPLE_RATE)
     
-    print(f"[Handler] voice={voice}, sr={sample_rate}, text_len={len(text)}", flush=True)
+    use_ssml = bool(ssml_text)
+    if use_ssml:
+        text_to_speak = ssml_text
+        print(f"[Handler] SSML mode, len={len(ssml_text)}", flush=True)
+    else:
+        text_to_speak = text
+        print(f"[Handler] voice={voice}, sr={sample_rate}, text_len={len(text)}", flush=True)
+    
     try:
-        text = normalize_numbers(text)
-        print(f"[Handler] after normalization: {len(text)} chars", flush=True)
-        wav_bytes, duration = synthesize(text=text, voice=voice, sample_rate=sample_rate)
+        if not use_ssml:
+            text_to_speak = normalize_numbers(text_to_speak)
+            print(f"[Handler] after normalization: {len(text_to_speak)} chars", flush=True)
+        wav_bytes, duration = synthesize(
+            text=text_to_speak,
+            voice=voice,
+            sample_rate=sample_rate,
+            use_ssml=use_ssml
+        )
         audio_b64 = base64.b64encode(wav_bytes).decode()
         print(f"[Handler] {len(wav_bytes)}b, {duration:.1f}s", flush=True)
         return {"audio": audio_b64, "sample_rate": sample_rate, "duration_sec": round(duration, 2), "format": "wav"}
