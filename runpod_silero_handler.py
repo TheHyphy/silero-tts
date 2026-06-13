@@ -3,6 +3,7 @@
 RunPod Serverless Handler — Silero TTS (Russian voice xenia)
 ============================================================
 Fixed: torch.hub API without silero package dependency.
+v2: Added Latin→Cyrillic transliteration + improved number normalization.
 """
 import base64, io, json, os, re, struct, sys, time, traceback
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 import torch
 import numpy as np
 from num2words import num2words
+from g2p_en import G2p
 
 DEFAULT_VOICE = "xenia"
 DEFAULT_SAMPLE_RATE = 24000
@@ -17,7 +19,202 @@ DEFAULT_SAMPLE_RATE = 24000
 _model = None
 _model_device = None
 _model_speakers = []
+_g2p = None
 
+# ── Latin→Cyrillic transliteration ───────────────────────────────────
+
+ARPABET_TO_RU = {
+    'AA': 'а', 'AE': 'э', 'AH': 'а', 'AO': 'о', 'AW': 'ау',
+    'AY': 'ай', 'EH': 'э', 'ER': 'ер', 'EY': 'эй', 'IH': 'и',
+    'IY': 'и', 'OW': 'оу', 'OY': 'ой', 'UH': 'у', 'UW': 'у',
+    'B': 'б', 'CH': 'ч', 'D': 'д', 'DH': 'з', 'F': 'ф',
+    'G': 'г', 'HH': 'х', 'JH': 'дж', 'K': 'к', 'L': 'л',
+    'M': 'м', 'N': 'н', 'NG': 'нг', 'P': 'п', 'R': 'р',
+    'S': 'с', 'SH': 'ш', 'T': 'т', 'TH': 'с', 'V': 'в',
+    'W': 'в', 'Y': 'й', 'Z': 'з', 'ZH': 'ж',
+}
+
+LETTER_TO_RU = {
+    'A': 'эй', 'B': 'би', 'C': 'си', 'D': 'ди', 'E': 'и',
+    'F': 'эф', 'G': 'джи', 'H': 'эйч', 'I': 'ай', 'J': 'джей',
+    'K': 'кей', 'L': 'эл', 'M': 'эм', 'N': 'эн', 'O': 'оу',
+    'P': 'пи', 'Q': 'кью', 'R': 'ар', 'S': 'эс', 'T': 'ти',
+    'U': 'ю', 'V': 'ви', 'W': 'дабл-ю', 'X': 'экс', 'Y': 'уай', 'Z': 'зэд',
+}
+
+CUSTOM_DICT = {
+    'mg': 'миллиграмм', 'ml': 'миллилитр', 'mm': 'миллиметр',
+    'cm': 'сантиметр', 'km': 'километр', 'kg': 'килограмм',
+    'hz': 'герц', 'khz': 'килогерц', 'mhz': 'мегагерц',
+    'ghz': 'гигагерц', 'w': 'ватт', 'kw': 'киловатт',
+    'v': 'вольт', 'mv': 'милливольт', 'ma': 'миллиампер',
+    'the': 'зе', 'and': 'энд', 'for': 'фор', 'with': 'виз',
+    'that': 'зэт', 'this': 'зис',
+    'a': 'а', 'i': 'ай', 'is': 'ис', 'in': 'ин', 'it': 'ит',
+    'of': 'ов', 'on': 'он', 'to': 'ту', 'by': 'бай', 'as': 'эз',
+    'are': 'ар', 'was': 'воз', 'were': 'вер',
+    'be': 'би', 'been': 'бин', 'have': 'хэв', 'has': 'хэз',
+    'not': 'нот', 'no': 'ноу', 'yes': 'йес',
+    'we': 'ви', 'he': 'хи', 'she': 'ши', 'you': 'ю',
+    # Madoka character names
+    'madoka': 'мадока', 'kyubey': 'кьюбей', 'homura': 'хомура',
+    'sayaka': 'саяка', 'mami': 'мами', 'kyoko': 'кёко',
+    'akemi': 'акеми', 'tomoe': 'томоэ', 'miki': 'мики', 'sakura': 'сакура',
+    'kaname': 'канамэ', 'puella magi': 'пуэлла маги',
+    'mado': 'мадо', 'magi': 'маги', 'magica': 'магика',
+    'anime': 'аниме', 'manga': 'манга',
+}
+
+def _get_g2p():
+    global _g2p
+    if _g2p is None:
+        _g2p = G2p()
+    return _g2p
+
+def _is_acronym(word):
+    if not word or len(word) < 2 or len(word) > 6:
+        return False
+    return all(c.isupper() for c in word if c.isalpha())
+
+def _spell_acronym(word):
+    letters = [c for c in word if c.isalpha()]
+    ru_letters = [LETTER_TO_RU.get(c.upper(), c) for c in letters]
+    return '-'.join(ru_letters)
+
+def word_to_ru(word):
+    """Transcribe a single English word to Russian phonetics."""
+    if not word or not re.search(r'[a-zA-Z]', word):
+        return word
+    word_lower = word.lower()
+    if word_lower in CUSTOM_DICT:
+        return CUSTOM_DICT[word_lower]
+    if _is_acronym(word):
+        return _spell_acronym(word)
+    g2p = _get_g2p()
+    phonemes = g2p(word)
+    result = []
+    for p in phonemes:
+        clean_p = re.sub(r'\d+$', '', p)
+        if clean_p in ARPABET_TO_RU:
+            result.append(ARPABET_TO_RU[clean_p])
+        else:
+            if p.strip():
+                result.append(p)
+    return ''.join(result)
+
+LATIN_TOKEN_PATTERN = re.compile(
+    r'(?<=\d)(?:mg|ml|mm|cm|km|kg|hz|khz|mhz|ghz|w|kw|v|mv|ma)(?!\w)'
+    r'|'
+    r'(?:[A-Z]\.)+[A-Z]?'
+    r'|'
+    r"[A-Za-z]+(?:['-][A-Za-z]+)*"
+)
+
+def transliterate_latin(text):
+    """Replace Latin words/letters with Russian phonetic transcription."""
+    def replace_match(m):
+        word = m.group(0)
+        if re.match(r'^[a-z]+$', word) and word.lower() in CUSTOM_DICT:
+            return CUSTOM_DICT[word.lower()]
+        return word_to_ru(word)
+    return LATIN_TOKEN_PATTERN.sub(replace_match, text)
+
+# ── Number normalization ─────────────────────────────────────────────
+
+def normalize_numbers(text):
+    """Replace numeric expressions with Russian words."""
+    # 1. Section numbers: "1.1" → "один один", "3.5" → "три пять"
+    text = re.sub(r'(?<!\d)(\d+)\.(\d+)(?!\d)', lambda m: (
+        f"{num2words(int(m.group(1)), lang='ru')} {num2words(int(m.group(2)), lang='ru')}"
+    ), text)
+    
+    # 2. Fractions: "7/7" → "семь из семи", "3/4" → "три четвертых"
+    text = re.sub(r'(?<!\d)(\d+)/(\d+)(?!\d)', lambda m: (
+        f"{num2words(int(m.group(1)), lang='ru')} из {num2words(int(m.group(2)), lang='ru')}"
+    ), text)
+    
+    # 3. Exponents
+    text = re.sub(r"10\u00b2\u00b2", "десять в двадцать второй степени", text)
+    text = re.sub(r"(\d+)\s*\^\s*(\d+)", lambda m: (
+        f"{num2words(int(m.group(1)), lang='ru')} в степени {num2words(int(m.group(2)), lang='ru')}"
+    ), text)
+    
+    months = r"(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)"
+    
+    # 4. Date + month
+    text = re.sub(r"(?<!\d)(\d{1,2})\s*(" + months + r")", lambda m: (
+        f"{num2words(int(m.group(1)), lang='ru', to='ordinal', gender='n', case='genitive')} {m.group(2)}"
+    ), text)
+    
+    # 5. Number + "век"
+    text = re.sub(r"(\d{1,2})\s*век\b", lambda m: (
+        f"{num2words(int(m.group(1)), lang='ru', to='ordinal', gender='m')} век"
+    ), text)
+    
+    # 6. Year + case forms
+    for pattern, ordinal in [
+        (r"(?<!\d)(\d{4})\s+года\b", "genitive"),
+        (r"(?<!\d)(\d{4})\s+году\b", "dative"),
+        (r"(?<!\d)(\d{4})\s+годом\b", "instrumental"),
+        (r"(?<!\d)(\d{4})\s*г(?:од|\.)\b", "nominative"),
+    ]:
+        text = re.sub(pattern, lambda m, case=ordinal: (
+            f"{num2words(int(m.group(1)), lang='ru', to='ordinal', gender='m', case=case)} "
+            f"{'год' if case in ('nominative', 'genitive') else 'году' if case == 'dative' else 'годом'}"
+        ), text)
+    
+    # 7. Year ranges
+    text = re.sub(r"(?<!\d)(\d{4})\s*[\u2013\u2014\u2212-]\s*(\d{4})(?!\d)", lambda m: (
+        f"{num2words(int(m.group(1)), lang='ru', to='ordinal', gender='m')} — "
+        f"{num2words(int(m.group(2)), lang='ru', to='ordinal', gender='m')}"
+    ), text)
+    
+    # 8. "N лет/N года"
+    text = re.sub(r"(?<!\d)(\d{1,3})\s+лет\b", lambda m: (
+        f"{num2words(int(m.group(1)), lang='ru')} лет"
+    ), text)
+    text = re.sub(r"(?<!\d)(\d{1,3})\s+года\b", lambda m: (
+        f"{num2words(int(m.group(1)), lang='ru')} года"
+    ), text)
+    
+    # 9. General standalone numbers
+    def replace_number(m):
+        raw = m.group(0).replace(" ", "").replace("\u202f", "")
+        try:
+            if "," in raw:
+                parts = raw.split(",")
+                return f"{num2words(int(parts[0]), lang='ru')} целых {parts[1]}"
+            num = int(raw)
+            return num2words(num, lang="ru")
+        except Exception:
+            return raw
+    
+    text = re.sub(r"(?<![а-яёa-zA-Z\d])(\d{1,3}(?:[\s,\u202f]\d{3})*|\d+)(?![а-яёa-zA-Z\d])", replace_number, text)
+    
+    # 10. Percentages
+    def replace_pct(m):
+        try:
+            n = int(m.group(1))
+            word = num2words(n, lang='ru')
+            last_two = n % 100
+            last_digit = n % 10
+            if last_two in (11, 12, 13, 14):
+                pct_word = "процентов"
+            elif last_digit == 1:
+                pct_word = "процент"
+            elif last_digit in (2, 3, 4):
+                pct_word = "процента"
+            else:
+                pct_word = "процентов"
+            return f"{word} {pct_word}"
+        except ValueError:
+            return m.group(0)
+    
+    text = re.sub(r"(\d+)\s*%", replace_pct, text)
+    
+    return text
+
+# ── Silero model ─────────────────────────────────────────────────────
 
 def load_model():
     global _model, _model_device, _model_speakers
@@ -27,7 +224,6 @@ def load_model():
     torch.backends.quantized.engine = "qnnpack"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Try multiple approaches to load model
     errors = []
     
     # Approach 1: torch.hub with silero_tts
@@ -71,33 +267,9 @@ def load_model():
     except Exception as e:
         errors.append(f"torch.hub v2: {e}")
 
-    # Approach 3: direct download from Silero releases
-    try:
-        print(f"[Silero] Downloading from GitHub releases...", flush=True)
-        import urllib.request
-        import zipfile
-        
-        url = "https://github.com/snakers4/silero-models/releases/download/v4.0/silero_tts_ru_v4.pt"
-        model_path = Path("/tmp/silero_models/silero_tts_ru_v4.pt")
-        model_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        if not model_path.exists():
-            t0 = time.time()
-            urllib.request.urlretrieve(url, model_path)
-            print(f"[Silero] Downloaded in {time.time()-t0:.1f}s", flush=True)
-        
-        model = torch.package.PackageImporter(model_path).load_pickle("tts_models", "model")
-        model = model.to(device)
-        _model = model
-        _model_device = device
-        _model_speakers = ["xenia", "baya", "kseniya", "natasha", "random"]
-        print(f"[Silero] Loaded from direct download", flush=True)
-        return _model, _model_device, _model_speakers
-    except Exception as e:
-        errors.append(f"direct: {e}")
-
     raise RuntimeError(f"All load approaches failed: {'; '.join(errors)}")
 
+# ── Text splitting ───────────────────────────────────────────────────
 
 def split_text(text: str, max_chars: int = 450) -> list[str]:
     if len(text) <= max_chars:
@@ -121,6 +293,7 @@ def split_text(text: str, max_chars: int = 450) -> list[str]:
         chunks.append(current)
     return chunks
 
+# ── Synthesis ────────────────────────────────────────────────────────
 
 def synthesize(text: str, voice: str = DEFAULT_VOICE,
                sample_rate: int = DEFAULT_SAMPLE_RATE,
@@ -196,52 +369,7 @@ def synthesize(text: str, voice: str = DEFAULT_VOICE,
     
     return buf.getvalue(), total_duration
 
-
-def normalize_numbers(text: str) -> str:
-    """Replace numeric expressions with Russian words (from laptop config)."""
-    # 1. Exponents
-    text = re.sub(r"10\u00b2\u00b2", "десять в двадцать второй степени", text)
-    text = re.sub(r"(\d+)\s*\^\s*(\d+)", lambda m: f"{num2words(int(m.group(1)), lang='ru')} в степени {num2words(int(m.group(2)), lang='ru')}", text)
-
-    months = r"(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)"
-
-    # 2. Date: 15 марта -> neuter genitive
-    text = re.sub(r"(?<!\d)(\d{1,2})\s*(" + months + r")", lambda m: f"{num2words(int(m.group(1)), lang='ru', to='ordinal', gender='n', case='genitive')} {m.group(2)}", text)
-
-    # 3. Number + "век" -> masculine nominative
-    text = re.sub(r"(\d{1,2})\s*век\b", lambda m: f"{num2words(int(m.group(1)), lang='ru', to='ordinal', gender='m')} век", text)
-
-    # 4. Year + "года" -> masculine genitive
-    text = re.sub(r"(?<!\d)(\d{4})\s+года\b", lambda m: f"{num2words(int(m.group(1)), lang='ru', to='ordinal', gender='m', case='genitive')} года", text)
-    text = re.sub(r"(?<!\d)(\d{1,3})\s+года\b", lambda m: f"{num2words(int(m.group(1)), lang='ru')} года", text)
-    text = re.sub(r"(?<!\d)(\d{1,3})\s+лет\b", lambda m: f"{num2words(int(m.group(1)), lang='ru')} лет", text)
-
-    # 5. Year + "году" -> masculine dative
-    text = re.sub(r"(?<!\d)(\d{4})\s+году\b", lambda m: f"{num2words(int(m.group(1)), lang='ru', to='ordinal', gender='m', case='dative')} году", text)
-
-    # 6. Year + "годом" -> masculine instrumental
-    text = re.sub(r"(?<!\d)(\d{4})\s+годом\b", lambda m: f"{num2words(int(m.group(1)), lang='ru', to='ordinal', gender='m', case='instrumental')} годом", text)
-
-    # 7. Year + "год"/"г." -> masculine nominative
-    text = re.sub(r"(?<!\d)(\d{4})\s*г(?:од|\.)\b", lambda m: f"{num2words(int(m.group(1)), lang='ru', to='ordinal', gender='m')} год", text)
-    text = re.sub(r"(?<!\d)(\d{4})\s*[\u2013\u2014\u2212-]\s*(\d{4})(?!\d)", lambda m: f"{num2words(int(m.group(1)), lang='ru', to='ordinal', gender='m')} — {num2words(int(m.group(2)), lang='ru', to='ordinal', gender='m')}", text)
-
-    # 8. General number replacement
-    def replace_number(m):
-        raw = m.group(0).replace(" ", "")
-        try:
-            if "," in raw:
-                parts = raw.split(",")
-                integer = num2words(int(parts[0]), lang="ru")
-                return f"{integer} целых {parts[1]}"
-            num = int(raw)
-            return num2words(num, lang="ru")
-        except Exception:
-            return raw
-
-    text = re.sub(r"(?<![а-яёa-zA-Z\d])(\d{1,3}(?:[\s,]\d{3})*|\d+)(?![а-яёa-zA-Z\d])", replace_number, text)
-    return text
-
+# ── Handler ──────────────────────────────────────────────────────────
 
 def handler(job):
     job_input = job.get("input", {})
@@ -264,6 +392,8 @@ def handler(job):
     
     try:
         if not use_ssml:
+            text_to_speak = transliterate_latin(text_to_speak)
+            print(f"[Handler] after transliteration: {len(text_to_speak)} chars", flush=True)
             text_to_speak = normalize_numbers(text_to_speak)
             print(f"[Handler] after normalization: {len(text_to_speak)} chars", flush=True)
         wav_bytes, duration = synthesize(
@@ -278,7 +408,6 @@ def handler(job):
     except Exception as e:
         traceback.print_exc()
         return {"error": str(e)}
-
 
 if __name__ == "__main__":
     try:
