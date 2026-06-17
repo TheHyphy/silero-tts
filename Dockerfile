@@ -6,10 +6,9 @@ ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y python3-pip wget libsndfile1 && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir numpy runpod requests omegaconf scipy soundfile num2words g2p_en nltk
+RUN pip install --no-cache-dir numpy runpod requests omegaconf scipy soundfile num2words g2p_en nltk && \
+    python3 -m nltk.downloader averaged_perceptron_tagger_eng cmudict -d /usr/share/nltk_data
 
-# Pre-download nltk data for g2p_en
-RUN python3 -c "import nltk; nltk.download('cmudict', quiet=True)"
 # Pre-download model into torch hub cache (v5_ru with xenia voice)
 RUN python3 -c "\
 import torch; \
